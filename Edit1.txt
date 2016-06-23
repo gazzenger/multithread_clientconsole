@@ -1,0 +1,376 @@
+
+ClientSocketRead  onRead
+ClientSocketDisconnect OnDisconnect
+ClientSocketConnect OnConnect
+
+
+Active := false;
+Address := '';
+ClientType := ctNonBlock;
+Host := '';
+Port := 0;
+Service := '';
+Tag := 0;
+
+
+
+{This program was created by Wack-a-Mole. You are free to use
+it or its source code in any way you want, just gimme some credit.
+If you want you can contact me at wackamonster@gmail.com}
+
+unit UnitMain;
+
+interface
+
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, ScktComp, StdCtrls, ExtCtrls, ComCtrls, Menus, ShellApi, AppEvnts;
+
+const
+  NIF_INFO = $10;
+  NIF_MESSAGE = 1;
+  NIF_ICON = 2;
+  NOTIFYICON_VERSION = 3;
+  NIF_TIP = 4;
+  NIM_SETVERSION = $00000004;
+  NIM_SETFOCUS = $00000003;
+  NIIF_INFO = $00000001;
+  NIIF_WARNING = $00000002;
+  NIIF_ERROR = $00000003;
+  NIN_BALLOONSHOW = WM_USER + 2;
+  NIN_BALLOONHIDE = WM_USER + 3;
+  NIN_BALLOONTIMEOUT = WM_USER + 4;
+  NIN_BALLOONUSERCLICK = WM_USER + 5;
+  NIN_SELECT = WM_USER + 0;
+  NINF_KEY = $1;
+  NIN_KEYSELECT = NIN_SELECT or NINF_KEY;
+  {other constants can be found in vs.net---vc7's dir: PlatformSDK\Include\ShellAPI.h}
+
+  {define the callback message}
+  TRAY_CALLBACK = WM_USER + $7258;
+
+   {new NotifyIconData structure definition}
+type
+  PNewNotifyIconData = ^TNewNotifyIconData;
+  TDUMMYUNIONNAME = record
+    case Integer of
+      0: (uTimeout: UINT);
+      1: (uVersion: UINT);
+  end;
+
+  TNewNotifyIconData = record
+    cbSize: DWORD;
+    Wnd: HWND;
+    uID: UINT;
+    uFlags: UINT;
+    uCallbackMessage: UINT;
+    hIcon: HICON;
+   //Version 5.0 is 128 chars, old ver is 64 chars
+    szTip: array[0..127] of Char;
+    dwState: DWORD; //Version 5.0
+    dwStateMask: DWORD; //Version 5.0
+    szInfo: array[0..255] of Char; //Version 5.0
+    DUMMYUNIONNAME: TDUMMYUNIONNAME;
+    szInfoTitle: array[0..63] of Char; //Version 5.0
+    dwInfoFlags: DWORD; //Version 5.0
+  end;
+
+
+
+type
+  TForm1 = class(TForm)
+    MemoChat: TMemo;
+    ButtonConnect: TButton;
+    ClientSocket: TClientSocket;
+    StatusBar: TStatusBar;
+    Bevel1: TBevel;
+    EditIP: TLabeledEdit;
+    EditPort: TLabeledEdit;
+    OpenDialog1: TOpenDialog;
+    Button1: TButton;
+    CheckBox1: TCheckBox;
+    procedure ButtonConnectClick(Sender: TObject);
+    procedure ClientSocketRead(Sender: TObject; Socket: TCustomWinSocket);
+    procedure EditChatKeyPress(Sender: TObject; var Key: Char);
+    procedure FormCreate(Sender: TObject);
+    procedure ClientSocketConnect(Sender: TObject;
+      Socket: TCustomWinSocket);
+    procedure Exit1Click(Sender: TObject);
+    procedure ConnectDisconnect1Click(Sender: TObject);
+    procedure ClientSocketDisconnect(Sender: TObject;
+      Socket: TCustomWinSocket);
+    procedure ChangeNickname1Click(Sender: TObject);
+    procedure EditNickKeyPress(Sender: TObject; var Key: Char);
+    procedure Button1Click(Sender: TObject);
+    procedure FormDestroy(Sender: TObject);
+  private
+    { Private declarations }
+    IconData: TNewNotifyIconData;
+    procedure DeleteSysTrayIcon;
+    procedure ShowBalloonTips(title: string; description: string);
+    procedure AddSysTrayIcon;
+    procedure SysTrayIconMsgHandler(var Msg: TMessage); message TRAY_CALLBACK;
+
+
+  public
+    { Public declarations }
+    procedure WMSysCommand
+      (var Msg: TWMSysCommand);
+      message WM_SYSCOMMAND;
+
+  end;
+function ConvertToUNCPath
+  (MappedDrive: string): string;
+
+var
+  Form1: TForm1;
+  LocalHost: string;
+
+implementation
+
+{$R *.dfm}
+
+procedure TForm1.ButtonConnectClick(Sender: TObject);
+begin
+  ClientSocket.Host := EditIp.Text;
+  ClientSocket.Port := StrToInt(EditPort.Text);
+  ClientSocket.Active := True;
+end;
+
+procedure TForm1.ClientSocketRead(Sender: TObject;
+  Socket: TCustomWinSocket);
+var
+  read: string;
+  projpos: integer;
+  filepos: integer;
+  project: string;
+begin
+  read := socket.ReceiveText;
+  memoChat.Lines.Add(read);
+
+  //if pos(uppercase(Socket.LocalHost),uppercase(read)) = 0 then exit;
+
+  projpos := pos('Project:', read);
+  filepos := pos('File:', read);
+
+  project := copy(read, projpos + 8, filepos - (projpos + 9));
+
+  if not Form1.Visible then
+  ShowBalloonTips('Change of status', 'Project: ' + project);
+
+
+end;
+
+procedure TForm1.EditChatKeyPress(Sender: TObject; var Key: Char);
+begin
+  Key := #0; //i dont want to change the nickname at runtime
+end;
+
+procedure TForm1.FormCreate(Sender: TObject);
+begin
+  MemoChat.Clear;
+  StatusBar.SimpleText := 'Status: Ready [Not connected].';
+
+end;
+
+procedure TForm1.ClientSocketConnect(Sender: TObject;
+  Socket: TCustomWinSocket);
+begin
+  StatusBar.SimpleText := 'Status: Connected with ' + ClientSocket.Socket.RemoteHost;
+  LocalHost := Socket.LocalHost;
+  Button1.Enabled := true;
+end;
+
+procedure TForm1.Exit1Click(Sender: TObject);
+begin
+  Close;
+end;
+
+procedure TForm1.ConnectDisconnect1Click(Sender: TObject);
+begin
+  ClientSocket.Active := not ClientSocket.Active;
+end;
+
+procedure TForm1.ClientSocketDisconnect(Sender: TObject;
+  Socket: TCustomWinSocket);
+begin
+  StatusBar.SimpleText := 'Status: Disconnected.';
+end;
+
+procedure TForm1.ChangeNickname1Click(Sender: TObject);
+var
+  old, new: string;
+begin
+  InputQuery('New nick?', 'Please write the new nickname you want to use.', new);
+  if new = '' then
+    Exit;
+
+end;
+
+procedure TForm1.EditNickKeyPress(Sender: TObject; var Key: Char);
+begin
+  Key := #0;
+end;
+
+
+function ConvertToUNCPath
+  (MappedDrive: string): string;
+var
+  RemoteString: array[0..255] of char;
+  lpRemote: PChar;
+  StringLen: Cardinal;
+begin
+  if (MappedDrive[1] = '\') and (MappedDrive[2] = '\') and FileExists(MappedDrive) then
+    Result := MappedDrive
+  else
+  begin
+    lpRemote := @RemoteString;
+    StringLen := 255;
+    if WNetGetConnection(Pchar(ExtractFileDrive(MappedDrive)), lpRemote, StringLen) = NO_ERROR then
+    begin
+      if FileExists(RemoteString + copy(MappedDrive, 3, length(MappedDrive) - 2)) then
+        Result := RemoteString + copy(MappedDrive, 3, length(MappedDrive) - 2)
+      else
+        Result := '';
+    end
+    else
+      Result := '';
+  end;
+end;
+
+
+
+procedure TForm1.Button1Click(Sender: TObject);
+var filename: string;
+  DefaultTitle: string;
+  Response: boolean;
+begin
+  if opendialog1.Execute then
+  begin
+    filename := ConvertToUNCPath(opendialog1.FileName);
+    if filename = '' then exit;
+
+    DefaultTitle := 'Project';
+    Response := InputQuery('Project Title', 'Please enter a project or analysis title', DefaultTitle);
+    if not (Response) then exit;
+
+    if not CheckBox1.Checked then
+    ClientSocket.Socket.SendText('[' + DatetoStr(Date) + ' ' + TimetoStr(GetTime) + '] ' + LocalHost + ': ' + 'proj=' + DefaultTitle + 'file=' + filename)
+    else
+    ClientSocket.Socket.SendText('[' + DatetoStr(Date) + ' ' + TimetoStr(GetTime) + '] ' + LocalHost + ': /autostart' + 'proj=' + DefaultTitle + 'file=' + filename);
+
+    Checkbox1.Checked := false;
+
+  end;
+end;
+
+procedure TForm1.SysTrayIconMsgHandler(var Msg: TMessage);
+begin
+  case Msg.lParam of
+    WM_MOUSEMOVE: ;
+    WM_LBUTTONDOWN: ;
+    WM_LBUTTONUP: ;
+    WM_LBUTTONDBLCLK:
+      begin
+        DeleteSysTrayIcon;
+        show();
+        SetForegroundWindow(Application.Handle);
+        exit;
+      end;
+    WM_RBUTTONDOWN: ;
+    WM_RBUTTONUP: ;
+    WM_RBUTTONDBLCLK: ;
+    //followed by the new messages
+    NIN_BALLOONSHOW: ;
+    {Sent when the balloon is shown}
+      //ShowMessage('NIN_BALLOONSHOW');
+    NIN_BALLOONHIDE:
+    {Sent when the balloon disappears?Rwhen the icon is deleted,
+    for example. This message is not sent if the balloon is dismissed because of
+    a timeout or mouse click by the user. }
+      ShowMessage('NIN_BALLOONHIDE');
+    NIN_BALLOONTIMEOUT: ;
+    {Sent when the balloon is dismissed because of a timeout.}
+      //ShowMessage('NIN_BALLOONTIMEOUT');
+    NIN_BALLOONUSERCLICK:
+    {Sent when the balloon is dismissed because the user clicked the mouse.
+    Note: in XP there's Close button on he balloon tips, when click the button,
+    send NIN_BALLOONTIMEOUT message actually.}
+      //ShowMessage('NIN_BALLOONUSERCLICK');
+      begin
+        DeleteSysTrayIcon;
+        show();
+        SetForegroundWindow(Application.Handle);
+        exit;
+      end;
+  end;
+end;
+
+ {AddSysTrayIcon procedure add an icon to notification area}
+
+procedure TForm1.AddSysTrayIcon;
+begin
+  IconData.cbSize := SizeOf(IconData);
+  IconData.Wnd := AllocateHWnd(SysTrayIconMsgHandler);
+  {SysTrayIconMsgHandler is then callback message' handler}
+  IconData.uID := 0;
+  IconData.uFlags := NIF_ICON or NIF_MESSAGE or NIF_TIP;
+  IconData.uCallbackMessage := TRAY_CALLBACK; //user defined callback message
+  IconData.hIcon := Application.Icon.Handle; //an Icon's Handle
+  IconData.szTip := 'Gary';
+  if not Shell_NotifyIcon(NIM_ADD, @IconData) then
+    ShowMessage('add fail');
+end;
+
+{ShowBalloonTips procedure carry out the new feature: Balloon Tips}
+
+procedure TForm1.ShowBalloonTips(title: string; description: string);
+var
+  TipInfo, TipTitle: string;
+begin
+  IconData.cbSize := SizeOf(IconData);
+  IconData.uFlags := NIF_INFO;
+  TipInfo := description;
+  strPLCopy(IconData.szInfo, TipInfo, SizeOf(IconData.szInfo) - 1);
+  IconData.DUMMYUNIONNAME.uTimeout := 3000;
+  TipTitle := title;
+  strPLCopy(IconData.szInfoTitle, TipTitle, SizeOf(IconData.szInfoTitle) - 1);
+  IconData.dwInfoFlags := NIIF_INFO; //NIIF_ERROR;  //NIIF_WARNING;
+  Shell_NotifyIcon(NIM_MODIFY, @IconData);
+  {in my testing, the following code has no use}
+  IconData.DUMMYUNIONNAME.uVersion := NOTIFYICON_VERSION;
+  Shell_NotifyIcon(NIM_SETVERSION, @IconData);
+
+end;
+
+{here's the deletion procedure}
+
+procedure TForm1.DeleteSysTrayIcon;
+begin
+  DeallocateHWnd(IconData.Wnd);
+  Shell_NotifyIcon(NIM_DELETE, @IconData);
+  //if not Shell_NotifyIcon(NIM_DELETE, @IconData) then
+    //ShowMessage('delete fail');
+end;
+
+
+procedure TForm1.FormDestroy(Sender: TObject);
+begin
+  DeleteSysTrayIcon;
+end;
+
+procedure TForm1.WMSysCommand;
+begin
+  if (Msg.CmdType = SC_MINIMIZE) or
+    (Msg.CmdType = SC_MAXIMIZE) then
+  begin
+    Hide();
+    AddSysTrayIcon;
+    //ShowBalloonTips('1','2');
+  end
+  else
+    DefaultHandler(Msg);
+end;
+
+
+end.
